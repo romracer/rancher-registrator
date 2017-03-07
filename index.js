@@ -8,6 +8,7 @@ var emitter = new DockerEvents({
 
 var _prefix = process.env.SVC_PREFIX || "";
 var _consulAgent = process.env.LOCAL_CONSUL_AGENT || "http://localhost:8500";
+var _consulToken = process.env.CONSUL_HTTP_TOKEN || "";
 
 emitter.start();
 
@@ -340,6 +341,9 @@ function doRegister(serviceDef,callback){
     var query = {
         "method":"PUT",
         "url": _consulAgent + "/v1/agent/service/register",
+        "qs":{
+            "token" : _consulToken
+        },
         "headers":{
             "Content-Type" : "application/json"
         },
@@ -360,6 +364,9 @@ function doDeregister(uuid,callback){
     var query = {
         "method":"GET",
         "url": _consulAgent + "/v1/agent/service/deregister/" + uuid,
+        "qs":{
+            "token" : _consulToken
+        },
     };
 
     request(query,function (error, response, body) {

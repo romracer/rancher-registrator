@@ -172,8 +172,9 @@ function checkForHealthCheckLabel(input){
             for (var key in input.metadata.labels) {
                 if (input.metadata.labels.hasOwnProperty(key)) {
 
-                    //Check if SERVICE_XXX_CHECK_HTTP is there
-                    var checkPattern = /SERVICE_(\d+)_CHECK_HTTP/g;
+                    //Check if SERVICE_XXX_CHECK_HTTP/HTTPS/TCP/SCRIPT/TTL is there
+                    //Update switch statement below if you add to this
+                    var checkPattern = /^SERVICE_(\d+)_CHECK_(HTTPS?|TCP|SCRIPT|TTL)$/g;
                     var checkMatch = checkPattern.exec(key);
 
                     //indice 1 of checkMatch contains the private port number
@@ -183,44 +184,84 @@ function checkForHealthCheckLabel(input){
                         if(!checks[checkMatch[1]])
                             checks[checkMatch[1]] = {};
 
+                        checks[checkMatch[1]].id =  input.metadata.name + "_" + checkMatch[0];
+                        checks[checkMatch[1]].name =  input.metadata.name + "_" + checkMatch[0];
+
                         var obj = jsonQuery('portMapping[privatePort=' + checkMatch[1] + ']', {
                             data: {"portMapping":input.metadata.portMapping}
                         });
 
-                        checks[checkMatch[1]].id =  input.metadata.name + "_" + checkMatch[0];
-                        checks[checkMatch[1]].name =  input.metadata.name + "_" + checkMatch[0];
-                        checks[checkMatch[1]].http = "http://localhost:" + obj.value.publicPort + input.metadata.labels[key];
-                        checks[checkMatch[1]].interval = "10s";
-                        checks[checkMatch[1]].timeout = "1s";
+                        //indice 2 of checkMatch contains the check type
+                        switch(checkMatch[2]){
+                            case 'HTTP':
+                                checks[checkMatch[1]].http = "http://" + input.metadata.hostIP + ":" + obj.value.publicPort + input.metadata.labels[key];
+                                checks[checkMatch[1]].interval = "10s";
+                                checks[checkMatch[1]].timeout = "1s";
+                                break;
+                            case 'HTTPS':
+                                checks[checkMatch[1]].http = "https://" + input.metadata.hostIP + ":" + obj.value.publicPort + input.metadata.labels[key];
+                                checks[checkMatch[1]].interval = "10s";
+                                checks[checkMatch[1]].timeout = "1s";
+                                break;
+                            case 'TCP':
+                                if(input.metadata.labels[key].toLowerCase() == "true"){
+                                    checks[checkMatch[1]].tcp = input.metadata.hostIP + ":" + obj.value.publicPort;
+                                    checks[checkMatch[1]].interval = "10s";
+                                    checks[checkMatch[1]].timeout = "1s";
+                                }
+                                break;
+                            case 'SCRIPT':
+                                checks[checkMatch[1]].script = input.metadata.labels[key].replace("$SERVICE_IP", input.metadata.hostIP).replace("$SERVICE_PORT", obj.value.publicPort);
+                                checks[checkMatch[1]].interval = "10s";
+                                checks[checkMatch[1]].timeout = "1s";
+                                break;
+                            case 'TTL':
+                                checks[checkMatch[1]].ttl = input.metadata.labels[key];
+                                break;
+                            default:
+                                //This should never happen
+                                reject("Unmatched check " + checkMatch[2]);
+                        }
 
-                    }
+                        if(checkMatch[2] != "TTL"){
 
-                    //Then, check if SERVICE_XXX_CHECK_INTERVAL is there
-                    var intervalPattern = /SERVICE_(\d+)_CHECK_INTERVAL/g;
-                    var intervalMatch = intervalPattern.exec(key);
+                            //Then, check if SERVICE_XXX_CHECK_INTERVAL is there
+                            var intervalPattern = /^SERVICE_(\d+)_CHECK_INTERVAL$/g;
+                            var intervalMatch = intervalPattern.exec(key);
 
-                    if(intervalMatch){
+                            if(intervalMatch){
 
-                        if(!checks[intervalMatch[1]])
-                            checks[intervalMatch[1]] = {};
+                                if(!checks[intervalMatch[1]])
+                                    checks[intervalMatch[1]] = {};
 
-                        checks[intervalMatch[1]].interval =  input.metadata.labels[key];
-                    }
+                                checks[intervalMatch[1]].interval =  input.metadata.labels[key];
+                            }
 
-                    //Then, check if SERVICE_XXX_CHECK_TIMEOUT is there
-                    var timeoutPattern = /SERVICE_(\d+)_CHECK_TIMEOUT/g;
-                    var timeoutMatch = timeoutPattern.exec(key);
+                            //Then, check if SERVICE_XXX_CHECK_TIMEOUT is there
+                            var timeoutPattern = /^SERVICE_(\d+)_CHECK_TIMEOUT$/g;
+                            var timeoutMatch = timeoutPattern.exec(key);
 
-                    if(timeoutMatch){
+                            if(timeoutMatch){
 
-                        if(!checks[timeoutMatch[1]])
-                            checks[timeoutMatch[1]] = {};
+                                if(!checks[timeoutMatch[1]])
+                                    checks[timeoutMatch[1]] = {};
 
-                        var obj = jsonQuery('portMapping[privatePort=' + timeoutMatch[1] + ']', {
-                            data: {"portMapping":input.metadata.portMapping}
-                        });
+                                checks[timeoutMatch[1]].timeout =  input.metadata.labels[key];
+                            }
 
-                        checks[timeoutMatch[1]].timeout =  input.metadata.labels[key];
+                        }
+
+                        //Then, check if SERVICE_XXX_INITIAL_STATUS is there
+                        var statusPattern = /^SERVICE_(\d+)_INITIAL_STATUS$/g;
+                        var statusMatch = statusPattern.exec(key);
+
+                        if(statusMatch){
+
+                            if(!checks[statusMatch[1]])
+                                checks[statusMatch[1]] = {};
+
+                            checks[statusMatch[1]].status =  input.metadata.labels[key];
+                        }
                     }
                 }
             }

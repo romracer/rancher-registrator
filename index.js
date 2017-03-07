@@ -186,6 +186,8 @@ function checkForHealthCheckLabel(input){
 
                         checks[checkMatch[1]].id =  input.metadata.name + "_" + checkMatch[0];
                         checks[checkMatch[1]].name =  input.metadata.name + "_" + checkMatch[0];
+                        checks[checkMatch[1]].interval = "10s";
+                        checks[checkMatch[1]].timeout = "1s";
 
                         var obj = jsonQuery('portMapping[privatePort=' + checkMatch[1] + ']', {
                             data: {"portMapping":input.metadata.portMapping}
@@ -195,25 +197,16 @@ function checkForHealthCheckLabel(input){
                         switch(checkMatch[2]){
                             case 'HTTP':
                                 checks[checkMatch[1]].http = "http://" + input.metadata.hostIP + ":" + obj.value.publicPort + input.metadata.labels[key];
-                                checks[checkMatch[1]].interval = "10s";
-                                checks[checkMatch[1]].timeout = "1s";
                                 break;
                             case 'HTTPS':
                                 checks[checkMatch[1]].http = "https://" + input.metadata.hostIP + ":" + obj.value.publicPort + input.metadata.labels[key];
-                                checks[checkMatch[1]].interval = "10s";
-                                checks[checkMatch[1]].timeout = "1s";
                                 break;
                             case 'TCP':
-                                if(input.metadata.labels[key].toLowerCase() == "true"){
+                                if(input.metadata.labels[key].toLowerCase() == "true")
                                     checks[checkMatch[1]].tcp = input.metadata.hostIP + ":" + obj.value.publicPort;
-                                    checks[checkMatch[1]].interval = "10s";
-                                    checks[checkMatch[1]].timeout = "1s";
-                                }
                                 break;
                             case 'SCRIPT':
                                 checks[checkMatch[1]].script = input.metadata.labels[key].replace("$SERVICE_IP", input.metadata.hostIP).replace("$SERVICE_PORT", obj.value.publicPort);
-                                checks[checkMatch[1]].interval = "10s";
-                                checks[checkMatch[1]].timeout = "1s";
                                 break;
                             case 'TTL':
                                 checks[checkMatch[1]].ttl = input.metadata.labels[key];
@@ -222,55 +215,56 @@ function checkForHealthCheckLabel(input){
                                 //This should never happen
                                 reject("Unmatched check " + checkMatch[2]);
                         }
+                    }
 
-                        if(checkMatch[2] != "TTL"){
+                    //Then, check if SERVICE_XXX_CHECK_INTERVAL is there
+                    var intervalPattern = /^SERVICE_(\d+)_CHECK_INTERVAL$/g;
+                    var intervalMatch = intervalPattern.exec(key);
 
-                            //Then, check if SERVICE_XXX_CHECK_INTERVAL is there
-                            var intervalPattern = /^SERVICE_(\d+)_CHECK_INTERVAL$/g;
-                            var intervalMatch = intervalPattern.exec(key);
+                    if(intervalMatch){
 
-                            if(intervalMatch){
+                        if(!checks[intervalMatch[1]])
+                            checks[intervalMatch[1]] = {};
 
-                                if(!checks[intervalMatch[1]])
-                                    checks[intervalMatch[1]] = {};
+                        checks[intervalMatch[1]].interval =  input.metadata.labels[key];
+                    }
 
-                                checks[intervalMatch[1]].interval =  input.metadata.labels[key];
-                            }
+                    //Then, check if SERVICE_XXX_CHECK_TIMEOUT is there
+                    var timeoutPattern = /^SERVICE_(\d+)_CHECK_TIMEOUT$/g;
+                    var timeoutMatch = timeoutPattern.exec(key);
 
-                            //Then, check if SERVICE_XXX_CHECK_TIMEOUT is there
-                            var timeoutPattern = /^SERVICE_(\d+)_CHECK_TIMEOUT$/g;
-                            var timeoutMatch = timeoutPattern.exec(key);
+                    if(timeoutMatch){
 
-                            if(timeoutMatch){
+                        if(!checks[timeoutMatch[1]])
+                            checks[timeoutMatch[1]] = {};
 
-                                if(!checks[timeoutMatch[1]])
-                                    checks[timeoutMatch[1]] = {};
+                        checks[timeoutMatch[1]].timeout =  input.metadata.labels[key];
+                    }
 
-                                checks[timeoutMatch[1]].timeout =  input.metadata.labels[key];
-                            }
+                    //Then, check if SERVICE_XXX_INITIAL_STATUS is there
+                    var statusPattern = /^SERVICE_(\d+)_INITIAL_STATUS$/g;
+                    var statusMatch = statusPattern.exec(key);
 
-                        }
+                    if(statusMatch){
 
-                        //Then, check if SERVICE_XXX_INITIAL_STATUS is there
-                        var statusPattern = /^SERVICE_(\d+)_INITIAL_STATUS$/g;
-                        var statusMatch = statusPattern.exec(key);
+                        if(!checks[statusMatch[1]])
+                            checks[statusMatch[1]] = {};
 
-                        if(statusMatch){
-
-                            if(!checks[statusMatch[1]])
-                                checks[statusMatch[1]] = {};
-
-                            checks[statusMatch[1]].status =  input.metadata.labels[key];
-                        }
+                        checks[statusMatch[1]].status =  input.metadata.labels[key];
                     }
                 }
             }
 
-             //Add checks in metadata for each port mapping
-             input.metadata.portMapping.forEach(function(item){
-                if(checks[item.privatePort])
+            //Add checks in metadata for each port mapping
+            input.metadata.portMapping.forEach(function(item){
+                if(checks[item.privatePort]){
+                    if(checks[item.privatePort].ttl){
+                        delete checks[item.privatePort].interval;
+                        delete checks[item.privatePort].timeout;
+                    }
                     item.Check = checks[item.privatePort];
-             })
+                }
+            })
 
             resolve(input)
         }

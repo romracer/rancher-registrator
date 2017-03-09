@@ -2,24 +2,26 @@ var async = require('async');
 var request = require('request');
 var DockerEvents = require('docker-events'),
     Dockerode = require('dockerode')
+var docker = new Dockerode({socketPath: '/var/run/docker.sock'});
 var emitter = new DockerEvents({
-    docker: new Dockerode({socketPath: '/var/run/docker.sock'}),
+    docker: docker,
 });
 
 var _prefix = process.env.SVC_PREFIX || "";
 var _consulAgent = process.env.LOCAL_CONSUL_AGENT || "http://localhost:8500";
 var _consulToken = process.env.CONSUL_HTTP_TOKEN || "";
+var _startupTimeout = process.env.STARTUP_DELAY_TIMER || 30;
 
 emitter.start();
 
-emitter.on("connect", function() {
+emitter.on("connect", function(){
     console.log("connected to docker api");
 });
 
-emitter.on('start', function(evt){
+emitter.on("start", function(evt){
 
     var name = evt.Actor.Attributes['io.rancher.container.name'] || evt.Actor.Attributes.name;
-    console.log(new Date() + ' - container start ' + name + ' (image : '+evt.Actor.Attributes.image+')');
+    console.log(new Date() + " - container start " + name + " (image : " + evt.Actor.Attributes.image + ")");
     getMetaData(name)
         .then(getAgentIP)
         .then(checkForPortMapping)
@@ -28,28 +30,56 @@ emitter.on('start', function(evt){
         .then(checkForServiceTagsLabel)
         .then(checkForHealthCheckLabel)
         .then(registerService)
-        .then(function (value) {
+        .then(function(value){
             console.log(value);
         }).catch(function(err){
-            console.log("ERROR : " + err);
+            console.log("Registering ERROR : " + err);
         })
 });
 
-emitter.on('stop', function(evt){
+emitter.on("stop", function(evt){
 
     var name = evt.Actor.Attributes['io.rancher.container.name'] || evt.Actor.Attributes.name;
-    console.log(new Date() + ' - container start ' + name + ' (image : '+evt.Actor.Attributes.image+')');
+    console.log(new Date() + " - container stop " + name + " (image : " + evt.Actor.Attributes.image + ")");
 
     getMetaData(name)
         .then(getAgentIP)
         .then(checkForPortMapping)
         .then(deregisterService)
-        .then(function (value) {
+        .then(function(value){
             console.log(value);
         }).catch(function(err){
             console.log("Deregistering ERROR : " + err);
         })
 });
+
+setTimeout(function(){
+
+    console.log(new Date() + " - registrator startup loop started");
+    docker.listContainers(function(err, containers){
+        containers.forEach(function(cont){
+            var container = docker.getContainer(cont.Id);
+            container.inspect(function(err, data){
+                var name = data.Config.Labels['io.rancher.container.name'] || data.Name;
+                console.log(new Date() + " - container found " + name + " (image : " + data.Image + ")");
+                getMetaData(name)
+                    .then(getAgentIP)
+                    .then(checkForPortMapping)
+                    .then(checkForServiceIgnoreLabel)
+                    .then(checkForServiceNameLabel)
+                    .then(checkForServiceTagsLabel)
+                    .then(checkForHealthCheckLabel)
+                    .then(registerService)
+                    .then(function(value){
+                        console.log(value);
+                    }).catch(function(err){
+                        console.log("Registering ERROR : " + err);
+                    })
+            });
+        });
+    });
+    console.log(new Date() + " - registrator startup loop finished");
+}, _startupTimeout * 1000);
 
 function getMetaData(servicename){
     return new Promise(
@@ -62,15 +92,16 @@ function getMetaData(servicename){
                 }
             }
 
-            request(query,function (error, response, body) {
-                if (error) {
+            request(query,function (error, response, body){
+                if(error){
                     reject("getMetaData error : " + error);
                 }
-
-                var output = {};
-                output.metadata = JSON.parse(body);
-                output.servicename = servicename;
-                resolve(output);
+                else{
+                    var output = {};
+                    output.metadata = JSON.parse(body);
+                    output.servicename = servicename;
+                    resolve(output);
+                }
             })
         }
     )
@@ -87,13 +118,14 @@ function getAgentIP(input){
                 }
             }
 
-            request(query,function (error, response, body) {
-                if (error) {
+            request(query,function (error, response, body){
+                if(error){
                     reject("getAgentIP error : " + error);
                 }
-
-                input.metadata.hostIP = JSON.parse(body).agent_ip;
-                resolve(input);
+                else{
+                    input.metadata.hostIP = JSON.parse(body).agent_ip;
+                    resolve(input);
+                }
             })
         }
     )
@@ -112,9 +144,8 @@ function checkForPortMapping(input){
                 })
                 resolve(input);
             }
-            else
-            {
-                reject("No need to register this service")
+            else{
+                reject("No need to register this service");
             }
         }
     )
@@ -127,8 +158,8 @@ function checkForServiceIgnoreLabel(input){
                 console.log("Service_Ignore found");
                 reject("Service ignored");
             }
-            else {
-                resolve(input)
+            else{
+                resolve(input);
             }
 
         }
@@ -142,7 +173,7 @@ function checkForServiceNameLabel(input){
                 console.log("Service_Name found");
                 input.metadata.service_name = input.metadata.labels.SERVICE_NAME;
             }
-            resolve(input)
+            resolve(input);
         }
     )
 }
@@ -154,7 +185,7 @@ function checkForServiceTagsLabel(input){
                 console.log("Service_Tags found");
                 input.metadata.service_tags = input.metadata.labels.SERVICE_TAGS.split(",");
             }
-            resolve(input)
+            resolve(input);
         }
     )
 }
@@ -170,8 +201,8 @@ function checkForHealthCheckLabel(input){
             //...
             var checks = {};
 
-            for (var key in input.metadata.labels) {
-                if (input.metadata.labels.hasOwnProperty(key)) {
+            for(var key in input.metadata.labels){
+                if(input.metadata.labels.hasOwnProperty(key)){
 
                     //Check if SERVICE_XXX_CHECK_HTTP/HTTPS/TCP/SCRIPT/TTL is there
                     //Update switch statement below if you add to this
@@ -267,7 +298,7 @@ function checkForHealthCheckLabel(input){
                 }
             })
 
-            resolve(input)
+            resolve(input);
         }
     )
 }
@@ -276,14 +307,14 @@ function registerService(input){
     return new Promise(
         function(resolve,reject){
             var serviceDefs = [];
-            input.metadata.portMapping.forEach(function(pm) {
+            input.metadata.portMapping.forEach(function(pm){
 
                 var id = input.metadata.uuid + ":" + pm.publicPort;
                 var name = _prefix + input.metadata.service_name;
-                if (pm.transport == "udp")
+                if(pm.transport == "udp")
                     id += ":udp";
 
-                if (input.metadata.portMapping.length > 1)
+                if(input.metadata.portMapping.length > 1)
                     name += "-" + pm.privatePort;
 
                 var definition = {
@@ -293,22 +324,20 @@ function registerService(input){
                     "Port": parseInt(pm.publicPort)
                 };
 
-                if (input.metadata.service_tags) {
+                if(input.metadata.service_tags)
                     definition.Tags = input.metadata.service_tags;
-                }
 
-                if(pm.Check){
+                if(pm.Check)
                     definition.Check = pm.Check;
-                }
 
-                serviceDefs.push(definition)
+                serviceDefs.push(definition);
 
             })
 
             async.map(serviceDefs,doRegister,function(err,results){
                 if(err)
                     console.log(err);
-                resolve(results)
+                resolve(results);
             });
         }
     )
@@ -325,13 +354,13 @@ function deregisterService(input){
 
                 if(pm.transport == "udp")
                     id += ":udp";
-                uniqueIDs.push(id)
+                uniqueIDs.push(id);
             });
 
             async.map(uniqueIDs,doDeregister,function(err,results){
                 if(err)
                     console.log(err);
-                resolve(results)
+                resolve(results);
             });
         }
     )
@@ -350,12 +379,12 @@ function doRegister(serviceDef,callback){
         "json":serviceDef
     };
 
-    request(query,function (error, response, body) {
-        if (error) {
+    request(query,function (error, response, body){
+        if(error){
             callback("registerService error : " + error,null);
         }
         else{
-            callback(null,serviceDef.ID + " registered")
+            callback(null,serviceDef.ID + " registered");
         }
     });
 }
@@ -369,12 +398,12 @@ function doDeregister(uuid,callback){
         },
     };
 
-    request(query,function (error, response, body) {
-        if (error) {
-            callback(error,null)
+    request(query,function (error, response, body){
+        if(error){
+            callback("deregisterService error : " + error,null);
         }
         else{
-            callback(null,uuid +" Service deregistered");
+            callback(null,uuid + " deregistered");
         }
     });
 }

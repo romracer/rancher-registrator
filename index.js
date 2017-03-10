@@ -55,7 +55,7 @@ emitter.on("stop", function(evt){
 
 setTimeout(function(){
 
-    console.log(new Date() + " - registrator startup loop started");
+    console.log("registrator startup loop begin");
     docker.listContainers(function(err, containers){
         containers.forEach(function(cont){
             var container = docker.getContainer(cont.Id);
@@ -78,7 +78,7 @@ setTimeout(function(){
             });
         });
     });
-    console.log(new Date() + " - registrator startup loop finished");
+    console.log("registrator startup loop end");
 }, _startupTimeout * 1000);
 
 function getMetaData(servicename){
@@ -134,7 +134,7 @@ function getAgentIP(input){
 function checkForPortMapping(input){
     return new Promise(
         function(resolve,reject){
-            if(input.metadata.ports.length > 0){
+            if(input.metadata.ports.length && input.metadata.ports.length > 0){
                 input.metadata.portMapping = [];
                 input.metadata.ports.forEach(function(pm){
                     var portMapping = pm.split(":");
@@ -310,9 +310,16 @@ function registerService(input){
             input.metadata.portMapping.forEach(function(pm){
 
                 var id = input.metadata.uuid + ":" + pm.publicPort;
-                var name = _prefix + input.metadata.service_name;
                 if(pm.transport == "udp")
                     id += ":udp";
+
+                var name = _prefix;
+                if(input.metadata.service_name == "null"){
+                    name += "external";
+                }
+                else{
+                    name += input.metadata.service_name;
+                }
 
                 if(input.metadata.portMapping.length > 1)
                     name += "-" + pm.privatePort;

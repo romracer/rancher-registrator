@@ -314,7 +314,7 @@ function registerService(input){
                     id += ":udp";
 
                 var name = _prefix;
-                if(input.metadata.service_name == ""){
+                if(input.metadata.service_name == null){
                     name += "external";
                 }
                 else{
